@@ -1,10 +1,12 @@
 // This is a temp file to write how I want the final version to look like
 
+#[derive(Clone, Copy)]
 pub enum MemState {
     Active,
     Inactive,
 }
 
+#[derive(Clone, Copy)]
 pub enum MemMode {
     Read,
     Write,
@@ -12,15 +14,15 @@ pub enum MemMode {
 
 #[derive(Chip, Default)]
 pub struct Processor {
-    #[pin(type = output)]
+    #[pin(output)]
     address_bus: u8,
-    #[pin(type = input)]
+    #[pin(input)]
     intr: bool,
-    #[pin(type = io)]
+    #[pin(io)]
     data_bus: u8,
-    #[pin(type = output)]
+    #[pin(output)]
     mem_state: MemState,
-    #[pin(type = output)]
+    #[pin(output)]
     mem_mode: MemMode,
 
     instr_cache: Vec<u8>,
@@ -39,13 +41,13 @@ impl HWModule for Processor {
 
 #[derive(Chip, Default)]
 pub struct Memory {
-    #[pin(type = input)]
+    #[pin(input)]
     op_mode: MemMode,
-    #[pin(type = input)]
+    #[pin(input)]
     address: u8,
-    #[pin(type = io)]
+    #[pin(io)]
     data: u8,
-    #[pin(type = input)]
+    #[pin(input)]
     active: MemState,
 
     mem: [u8; 255],
