@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use syn::parse::{Parse, ParseStream};
 use syn::{Result, Token};
 
@@ -7,21 +7,38 @@ use syn::{Result, Token};
 const CHIP_DEFINITION_KEYWORD: &str = "chip";
 const PIN_EXPOSE_KEYWORD: &str = "expose";
 
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+struct ChipPin {
+    chip: String,
+    pin: String,
+}
+
 #[derive(Debug)]
-pub struct PcbMacroInput {}
+pub struct PcbMacroInput {
+    name: syn::Ident,
+    chip_map: HashMap<String, Vec<String>>,
+    pin_connection_list: HashMap<ChipPin, HashSet<ChipPin>>,
+    exposed_pins: Vec<ChipPin>,
+}
 
 impl Parse for PcbMacroInput {
     fn parse(input: ParseStream) -> Result<Self> {
         let name = syn::Ident::parse(input)?;
         let content;
         let _braces = syn::braced!(content in input);
-        let mut module_kw;
+        let mut kw;
         let mut chip_map: HashMap<String, Vec<String>> = HashMap::new();
+
+        // this just stores a simple representation of connected pins,
+        // we convert this into a better structure to store into the builder in the into function
+        let mut pin_connection_list: HashMap<ChipPin, HashSet<ChipPin>> = HashMap::new();
+
+        let mut exposed_pins: Vec<ChipPin> = Vec::new();
 
         // this parses the module
         loop {
-            module_kw = syn::Ident::parse(&content)?;
-            if module_kw != CHIP_DEFINITION_KEYWORD {
+            kw = syn::Ident::parse(&content)?;
+            if kw != CHIP_DEFINITION_KEYWORD {
                 break;
             }
             let module_name = syn::Ident::parse(&content)?;
@@ -29,27 +46,28 @@ impl Parse for PcbMacroInput {
             chip_map.insert(module_name.to_string(), Vec::new());
         }
 
-        dbg!(&module_map);
         if chip_map.is_empty() {
             panic!("cannot make pcb with no chips!");
         }
 
-        if module_kw == PIN_EXPOSE_KEYWORD {
+        if kw == PIN_EXPOSE_KEYWORD {
             panic!("there are no pin connections in this pcb!");
         }
 
-        // here the module_kw will actually point to name of chip, for pin connections
+        // here the kw will actually point to name of chip, for pin connections
         loop {
-            if module_kw == PIN_EXPOSE_KEYWORD {
+            if kw == PIN_EXPOSE_KEYWORD {
                 break;
             }
-            let chip1 = module_kw.to_string();
+            let chip1 = kw.to_string();
             let _ = <Token![::]>::parse(&content)?;
             let pin1 = syn::Ident::parse(&content)?.to_string();
             // pin connection token is -
             let _ = <Token![-]>::parse(&content);
             let chip2 = syn::Ident::parse(&content)?.to_string();
+            let _ = <Token![::]>::parse(&content)?;
             let pin2 = syn::Ident::parse(&content)?.to_string();
+            let _ = <Token![;]>::parse(&content)?;
 
             if !chip_map.contains_key(&chip1) {
                 panic!("use of undeclared chip {}", chip1);
@@ -66,13 +84,71 @@ impl Parse for PcbMacroInput {
             let t = chip_map.get_mut(&chip2).unwrap();
             t.push(pin2.clone());
 
-            // now here we have to think of how to represent and store the connection of the chips
+            let chip_pin1 = ChipPin {
+                chip: chip1,
+                pin: pin1,
+            };
+            let chip_pin2 = ChipPin {
+                chip: chip2,
+                pin: pin2,
+            };
+
+            if let Some(l) = pin_connection_list.get_mut(&chip_pin1) {
+                // we first check if pin1 is already an entry, if so then add pin2 to its set
+                l.insert(chip_pin2);
+            } else if let Some(l) = pin_connection_list.get_mut(&chip_pin2) {
+                // else we check if pin2 is already an entry
+                l.insert(chip_pin1);
+            } else {
+                let mut _t = HashSet::new();
+                _t.insert(chip_pin2);
+                pin_connection_list.insert(chip_pin1, _t);
+            }
 
             // we have to parse it here for the next iteration
-            module_kw = syn::Ident::parse(&content)?;
+
+            match syn::Ident::parse(&content) {
+                Result::Ok(i) => kw = i,
+                Result::Err(_) => {
+                    return Ok(PcbMacroInput {
+                        name,
+                        pin_connection_list,
+                        chip_map,
+                        exposed_pins: Vec::new(),
+                    })
+                }
+            }
+        }
+        // now here the kw should be exposed
+        loop {
+            let chip = syn::Ident::parse(&content)?.to_string();
+            let _ = <Token![::]>::parse(&content)?;
+            let pin = syn::Ident::parse(&content)?.to_string();
+            let _ = <Token![;]>::parse(&content);
+            if !chip_map.contains_key(&chip) {
+                panic!("use of undeclared chip in expose pin : {}", chip);
+            }
+            exposed_pins.push(ChipPin {
+                chip: chip,
+                pin: pin,
+            });
+            match syn::Ident::parse(&content) {
+                Result::Ok(i) => {
+                    if i != PIN_EXPOSE_KEYWORD {
+                        panic!("expected 'expose' found {} instead", i.to_string());
+                    }
+                }
+                // this just means we have completed the parsing
+                Result::Err(_) => break,
+            }
         }
 
-        Ok(PcbMacroInput {})
+        Ok(PcbMacroInput {
+            name,
+            pin_connection_list,
+            chip_map,
+            exposed_pins,
+        })
     }
 }
 
