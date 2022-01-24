@@ -16,6 +16,7 @@ pub enum PinType {
 pub struct PinMetadata {
     pub pin_type: PinType,
     pub data_type: &'static str,
+    pub triastatable: bool,
 }
 
 impl std::fmt::Display for PinType {
@@ -52,6 +53,17 @@ pub trait ChipInterface {
 
     /// sets value of a specific pin, from the given reference
     fn set_pin_value(&mut self, name: &str, val: &dyn Any);
+
+    // The reason to include it in Chip interface, rather than anywhere else,
+    // is that I couldn't find a more elegant solution that can either directly
+    // implement on pin values which are typecasted to dyn Any. Thus the only way
+    // that we can absolutely make sure if a pin is tristated or not is in the
+    // Chip-level rather than the pin level. One major issue is that the data of
+    // which type the pin is is only available in the Chip derive macro, and cannot be
+    // used by the encompassing module in a way that will allow its usage in user programs
+    // which does not depend on syn/quote libs.
+    /// This is used to check if a tristatable pin is tristated or not
+    fn is_pin_tristated(&self, name: &str) -> bool;
 }
 
 /// This is intended to be implemented manually by user

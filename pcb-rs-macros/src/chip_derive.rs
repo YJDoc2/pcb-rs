@@ -76,6 +76,24 @@ fn get_pin_metadata<'a>(fields: &'a [&syn::Field]) -> Result<Vec<__PinMetadata<'
     Ok(ret)
 }
 
+fn pin_is_tristatable(ty: &syn::Type) -> bool {
+    // this is a soft check rather than a hard check if the pin is tristatabel
+    // or not. Technically users can define an `Option` struct/enum in their code
+    // which will still set this tristatable as true. But this allows a quick check
+    // later in pcb! generated module to see if a pin can be tristatable or not.
+    // In case one does use such custom enum, it will fail to compile due to the way
+    // is_tristated fn is implemented in the Chip derive macro
+    let dtype = quote! {#ty}.to_string();
+    // see if the type is `something` (anything) wrapped inside an option
+    // we first try to split at <, in case of a false negative such as OuterType<Option<usize>>
+    // then we check if the first part (before the first <) contains string Option or not
+    // if there is no <, then it cannot be an option, as Option as a type must have a type param
+    match dtype.split_once('<') {
+        Some((start, __)) => start.contains("Option"),
+        None => false,
+    }
+}
+
 pub fn derive_chip_impl(name: &syn::Ident, data: &syn::DataStruct) -> TokenStream {
     let fields = match &data.fields {
         syn::Fields::Unit | syn::Fields::Unnamed(_) => {
@@ -104,10 +122,14 @@ pub fn derive_chip_impl(name: &syn::Ident, data: &syn::DataStruct) -> TokenStrea
         // have to do that, as we can't access it as #p.data_type
         let __temp = p.data_type;
         let dtype = quote! {#__temp}.to_string();
+
+        let triastatable = pin_is_tristatable(__temp);
+
         quote! {
             #name, pcb_rs::PinMetadata{
                 pin_type:pcb_rs::PinType::#ptype,
-                data_type:#dtype
+                data_type:#dtype,
+                triastatable:#triastatable
             }
         }
     });
@@ -131,6 +153,22 @@ pub fn derive_chip_impl(name: &syn::Ident, data: &syn::DataStruct) -> TokenStrea
                 assert!(val.is::<#dtype>(), #assertion_err_msg);
                 self.#__name = val.downcast_ref::<#dtype>().unwrap().clone();
             }
+        }
+    });
+
+    let tristated_match_arm = metadata.iter().map(|p| {
+        let name = p.name;
+        let name_string = p.name.to_string();
+        let dtype = p.data_type;
+
+        // This is the hard check of tristatability. In case the user tries to use some custom type also
+        // named `Option`, then they will get an compile time error, as the match arms are incompatible
+        if pin_is_tristatable(dtype) {
+            quote! {
+                #name_string => matches!(self.#name,std::option::Option::None)
+            }
+        } else {
+            quote! {#name_string => false}
         }
     });
 
@@ -160,6 +198,13 @@ pub fn derive_chip_impl(name: &syn::Ident, data: &syn::DataStruct) -> TokenStrea
                 match name{
                     #(#set_pin_match_arm,)*
                     _ => {}
+                }
+            }
+
+            fn is_pin_tristated(&self,name:&str)->bool{
+                match name{
+                    #(#tristated_match_arm,)*
+                    _ => {false}
                 }
             }
 

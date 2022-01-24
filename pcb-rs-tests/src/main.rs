@@ -31,7 +31,7 @@ pub struct Processor {
     #[pin(input)]
     intr: bool,
     #[pin(io)]
-    data_bus: u8,
+    data_bus: Option<u8>,
     #[pin(output)]
     mem_state: MemState,
     #[pin(output)]
@@ -49,11 +49,15 @@ fn main() {
     println!("{:#?}", p.get_pin_list());
     println!(
         "{:?}",
-        p.get_pin_value("data_bus").unwrap().downcast_ref::<u8>()
+        p.get_pin_value("data_bus")
+            .unwrap()
+            .downcast_ref::<Option<u8>>()
     );
-    p.set_pin_value("data_bus", &5_u8);
+    p.set_pin_value("data_bus", &Some(5_u8));
     println!(
         "{:?}",
-        p.get_pin_value("data_bus").unwrap().downcast_ref::<u8>()
+        p.get_pin_value("data_bus")
+            .unwrap()
+            .downcast_ref::<Option<u8>>()
     );
 }
