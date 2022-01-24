@@ -1,4 +1,5 @@
 mod chip_derive;
+mod pcb_macro;
 
 use proc_macro::TokenStream;
 use syn::{parse_macro_input, DeriveInput};
@@ -15,4 +16,11 @@ pub fn derive_chip(input: TokenStream) -> TokenStream {
             return chip_derive::derive_chip_impl(&ast.ident, chip_struct).into();
         }
     }
+}
+
+#[proc_macro]
+pub fn pcb(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as pcb_macro::PcbMacroInput);
+    let output: proc_macro2::TokenStream = input.into();
+    output.into()
 }

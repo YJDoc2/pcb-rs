@@ -61,18 +61,18 @@ impl HWModule for Memory {
 }
 
 pcb!(BasicComputer{
-    module processor;
-    module memory;
+    chip processor;
+    chip memory;
 
-    processor::address_bus - memory::address
-    processor::data_bus - memory::data
-    processor::mem_mode - memory::op_mode
-    processor::mem_state - memory::active
+    processor::address_bus - memory::address;
+    processor::data_bus - memory::data;
+    processor::mem_mode - memory::op_mode;
+    processor::mem_state - memory::active;
 
-    expose memory::address
-    expose memory::data
-    expose memory::op_mode
-    expose memory::active
+    expose memory::address;
+    expose memory::data;
+    expose memory::op_mode;
+    expose memory::active;
 });
 
 fn get_basic_computer() -> BasicComputer {
