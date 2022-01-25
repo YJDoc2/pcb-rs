@@ -1,7 +1,7 @@
+use quote::quote;
 use std::collections::{HashMap, HashSet};
 use syn::parse::{Parse, ParseStream};
 use syn::{Result, Token};
-
 // ! TODO Add better error reporting
 
 const CHIP_DEFINITION_KEYWORD: &str = "chip";
@@ -154,7 +154,116 @@ impl Parse for PcbMacroInput {
 
 impl Into<proc_macro2::TokenStream> for PcbMacroInput {
     fn into(self) -> proc_macro2::TokenStream {
-        proc_macro2::TokenStream::new()
+        self.generate()
         // "fn test()->usize{5}".parse().unwrap()
+    }
+}
+
+impl PcbMacroInput {
+    fn generate(self) -> proc_macro2::TokenStream {
+        dbg!(&self.pin_connection_list);
+        let pcb_name = self.name;
+        let builder_name = quote::format_ident!("{}Builder", pcb_name);
+
+        let chip_names = self.chip_map.iter().map(|(name, _)| quote! {#name});
+
+        let chip_pin_check = self.chip_map.iter().map(|(name,pins)|{
+            let pin_names = pins.iter().map(|n|{quote!{#n}});
+            quote!{
+                let chip = self.added_chip_map.get(#name).unwrap();
+                let chip_pins = chip.get_pin_list();
+                for pin in [#(#pin_names),*]{
+                    if !chip_pins.contains_key(pin){
+                        return Err(format!("Invalid chip added : chip {} expected to have pin named {}, not found",#name,pin));
+                    }
+                }
+            }
+        });
+
+        // this will bind some variables to the actual entered chips
+        let instantiate_chip_vars = self.chip_map.iter().map(|(name, _)| {
+            let __name = syn::Ident::new(&name, pcb_name.span());
+            quote! {let #__name = self.added_chip_map.get(#name).unwrap().get_pin_list();}
+        });
+
+        let pin_connection_checks = self
+            .pin_connection_list
+            .iter()
+            .map(|(pin, connected_pins)| {
+                let _chip = &pin.chip;
+                let _pin = &pin.pin;
+                let chip_ident = syn::Ident::new(&_chip, pcb_name.span());
+                let connected_pin_iter = connected_pins.iter().map(|pin| {
+                    let __chip = &pin.chip;
+                    let __pin = &pin.pin;
+                    let chip_ident = syn::Ident::new(__chip,pcb_name.span());
+                    quote! {
+                        let __pin2 = #chip_ident.get(#__pin).unwrap();
+                        if !__pin1.is_connectable(__pin2){
+                            return std::result::Result::Err(
+                                format!("Invalid chip connection : cannot connect chip {}'s pin {} ({:?}) to chip {}'s pin {} ({:?})",
+                                    #_chip,#_pin,__pin1,#__chip,#__pin,__pin2
+                                )
+                            )
+                        }
+                    }
+                });
+
+                quote! {
+                    let __pin1 = #chip_ident.get(#_pin).unwrap();
+                    #(#connected_pin_iter)*   
+                }
+            });
+
+        quote! {
+
+            struct #pcb_name{}
+
+            struct #builder_name{
+                added_chip_map:std::collections::HashMap<String,std::boxed::Box<dyn pcb_rs::HardwareModule>>
+            }
+
+            impl #builder_name{
+
+                pub fn new()->Self{
+                    Self{
+                        added_chip_map:std::collections::HashMap::new()
+                    }
+                }
+
+                pub fn add_chip(mut self,name:&str,chip:std::boxed::Box<dyn pcb_rs::HardwareModule>)->Self{
+                    self.added_chip_map.insert(name.to_string(),chip);
+                    self
+                }
+
+                pub fn build(self)->std::result::Result<#pcb_name,String>{
+                    self.check_added_all_chips()?;
+                    self.check_valid_chips()?;
+
+                    Ok(#pcb_name{})
+                }
+
+                fn check_added_all_chips(&self)->Result<(),String>{
+                    for chip in [#(#chip_names),*]{
+                        if !self.added_chip_map.contains_key(chip){
+                            return Err(format!("chip {} defined in pcb design, but not added",chip))
+                        }
+                    }
+                    Ok(())
+                }
+                fn check_valid_chips(&self)->Result<(),String>{
+                    #(#chip_pin_check)*
+                    Ok(())
+                }
+
+                fn check_valid_pin_connection(&self)->Result<(),String>{
+                    #(#instantiate_chip_vars)*
+                    #(#pin_connection_checks)*
+                    
+                    Ok(())
+                }
+
+            }
+        }
     }
 }

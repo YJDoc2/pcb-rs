@@ -17,3 +17,13 @@ They way this is implemented is n0ot the best or elegant way, but that was the o
 ## syntax of the pcb!
 
 note that the pin name cannot be rust keyword.
+
+## note on pin types
+
+unfortunately as the type information is not resolved at macro expansion time (and there is not type to represent type (yet)), we use the type-string, to represent types in PinMetadata. Unfortunately that means that for connected pin of the chips, the types must be exactly same when treaded as string :
+
+- both u8 is valid, but
+
+- std::option::Option and Option would not be treated as he same type
+
+As their string representations are different. Note that this can result in errors at runtime (i.e. after building the pcb) as `Option` can mean two different types in two different files. I don't know how to solve that currently, so better to use fully explicit types except for primitive datatypes.

@@ -19,6 +19,23 @@ pub struct PinMetadata {
     pub triastatable: bool,
 }
 
+impl PinMetadata {
+    pub fn is_connectable(&self, other: &PinMetadata) -> bool {
+        let both_input =
+            matches!(self.pin_type, PinType::Input) && matches!(other.pin_type, PinType::Input);
+        let both_output =
+            matches!(self.pin_type, PinType::Output) && matches!(other.pin_type, PinType::Output);
+        let both_tristatable = self.triastatable ^ other.triastatable;
+        let both_same_type = self.data_type == other.data_type;
+
+        // for pins to be connectable, both should NOT be input, both should NOT be output
+        // and both either should or should not be tristatable, the xor gives true if one is and one isn't
+        // so we check for it being false as well, and both should be of same type
+
+        return !both_input && !both_output && !both_tristatable && both_same_type;
+    }
+}
+
 impl std::fmt::Display for PinType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
