@@ -83,14 +83,27 @@ fn pin_is_tristatable(ty: &syn::Type) -> bool {
     // later in pcb! generated module to see if a pin can be tristatable or not.
     // In case one does use such custom enum, it will fail to compile due to the way
     // is_tristated fn is implemented in the Chip derive macro
-    let dtype = quote! {#ty}.to_string();
-    // see if the type is `something` (anything) wrapped inside an option
-    // we first try to split at <, in case of a false negative such as OuterType<Option<usize>>
-    // then we check if the first part (before the first <) contains string Option or not
-    // if there is no <, then it cannot be an option, as Option as a type must have a type param
-    match dtype.split_once('<') {
-        Some((start, __)) => start.contains("Option"),
-        None => false,
+    match ty {
+        syn::Type::Path(p) => {
+            let segments: Vec<_> = p.path.segments.iter().collect();
+            // if the path is fully qualified, i.e. std::option::Option or ::std::option::Option
+            if segments.len() >= 3 {
+                return segments[0].ident == "std"
+                    && segments[1].ident == "option"
+                    && segments[2].ident == "Option";
+            }
+            // is user has brought std::option in scope
+            if segments.len() >= 2 {
+                return segments[0].ident == "option" && segments[1].ident == "Option";
+            }
+            // if user it using the "normal" way
+            if segments.len() >= 1 {
+                return segments[0].ident == "Option";
+            }
+
+            false
+        }
+        _ => false,
     }
 }
 

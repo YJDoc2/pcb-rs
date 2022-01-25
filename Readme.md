@@ -12,7 +12,9 @@ In real world, such issue is solved by two methods : see [this](https://www.micr
 
 In case of this library, we use rust std::option::Option to indicate that a pin is tristatable, and multiple pins are allowed to connect to same pin only if all are tristatable. The case of multiple tristatable pins have Some(\_) at the same time, this is equivalent to multiple pins going high/low at the same time, and thus the code will panic at runtime, equivalent to the chip burning.
 
-They way this is implemented is n0ot the best or elegant way, but that was the only feasible way I could find.
+The tristatable pin must have type wrapped in std::option::Option, and the std::option::option can be used with fully qualified path (std::option::Option / ::std::option::Option), or option::Option (using `use std::option` before) or directly Option. any other way to use will not be currently counted as a tristatable pin.
+
+They way this is implemented is not the best or elegant way, but that was the only feasible way I could find.
 
 ## syntax of the pcb!
 
