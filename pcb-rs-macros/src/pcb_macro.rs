@@ -47,11 +47,12 @@ impl Parse for PcbMacroInput {
         }
 
         if chip_map.is_empty() {
-            panic!("cannot make pcb with no chips!");
+           return Err(syn::Error::new_spanned(&name,"cannot make pcb with no chips!"));
+            
         }
 
         if kw == PIN_EXPOSE_KEYWORD {
-            panic!("there are no pin connections in this pcb!");
+            return Err(syn::Error::new_spanned(&name,"there are no pin connections in this pcb!"));   
         }
 
         // here the kw will actually point to name of chip, for pin connections
@@ -68,13 +69,16 @@ impl Parse for PcbMacroInput {
             let _ = <Token![::]>::parse(&content)?;
             let pin2 = syn::Ident::parse(&content)?.to_string();
             let _ = <Token![;]>::parse(&content)?;
+            
 
             if !chip_map.contains_key(&chip1) {
-                panic!("use of undeclared chip {}", chip1);
+                let t = format!("use of undeclared chip {}", chip1);
+                return Err(syn::Error::new_spanned(&chip1,t));
             }
 
             if !chip_map.contains_key(&chip2) {
-                panic!("use of undeclared chip {}", chip2);
+                let t = format!("use of undeclared chip {}", chip2);
+                return Err(syn::Error::new_spanned(&chip2,t));
             }
 
             // now we know for sure that both chips are declared and exists in the map
@@ -126,7 +130,8 @@ impl Parse for PcbMacroInput {
             let pin = syn::Ident::parse(&content)?.to_string();
             let _ = <Token![;]>::parse(&content);
             if !chip_map.contains_key(&chip) {
-                panic!("use of undeclared chip in expose pin : {}", chip);
+                let t = format!("use of undeclared chip in expose pin : {}", chip);
+                return Err(syn::Error::new_spanned(&chip,t));
             }
             exposed_pins.push(ChipPin {
                 chip: chip,
@@ -135,7 +140,8 @@ impl Parse for PcbMacroInput {
             match syn::Ident::parse(&content) {
                 Result::Ok(i) => {
                     if i != PIN_EXPOSE_KEYWORD {
-                        panic!("expected 'expose' found {} instead", i.to_string());
+                        let t =format!("expected 'expose' found {} instead", i.to_string());
+                        return Err(syn::Error::new_spanned(i,t));
                     }
                 }
                 // this just means we have completed the parsing
@@ -155,7 +161,6 @@ impl Parse for PcbMacroInput {
 impl Into<proc_macro2::TokenStream> for PcbMacroInput {
     fn into(self) -> proc_macro2::TokenStream {
         self.generate()
-        // "fn test()->usize{5}".parse().unwrap()
     }
 }
 
@@ -239,6 +244,7 @@ impl PcbMacroInput {
                 pub fn build(self)->std::result::Result<#pcb_name, std::string::String>{
                     self.check_added_all_chips()?;
                     self.check_valid_chips()?;
+                    self.check_valid_pin_connection()?;
 
                     std::result::Result::Ok(#pcb_name{})
                 }
