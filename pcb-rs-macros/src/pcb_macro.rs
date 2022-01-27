@@ -161,7 +161,6 @@ impl Into<proc_macro2::TokenStream> for PcbMacroInput {
 
 impl PcbMacroInput {
     fn generate(self) -> proc_macro2::TokenStream {
-        dbg!(&self.pin_connection_list);
         let pcb_name = self.name;
         let builder_name = quote::format_ident!("{}Builder", pcb_name);
 
@@ -174,7 +173,7 @@ impl PcbMacroInput {
                 let chip_pins = chip.get_pin_list();
                 for pin in [#(#pin_names),*]{
                     if !chip_pins.contains_key(pin){
-                        return Err(format!("Invalid chip added : chip {} expected to have pin named {}, not found",#name,pin));
+                        return std::result::Result::Err(format!("Invalid chip added : chip {} expected to have pin named {}, not found",#name,pin));
                     }
                 }
             }
@@ -185,6 +184,7 @@ impl PcbMacroInput {
             let __name = syn::Ident::new(&name, pcb_name.span());
             quote! {let #__name = self.added_chip_map.get(#name).unwrap().get_pin_list();}
         });
+        
 
         let pin_connection_checks = self
             .pin_connection_list
@@ -220,7 +220,7 @@ impl PcbMacroInput {
             struct #pcb_name{}
 
             struct #builder_name{
-                added_chip_map:std::collections::HashMap<String,std::boxed::Box<dyn pcb_rs::HardwareModule>>
+                added_chip_map:std::collections::HashMap<std::string::String,std::boxed::Box<dyn pcb_rs::HardwareModule>>
             }
 
             impl #builder_name{
@@ -231,36 +231,36 @@ impl PcbMacroInput {
                     }
                 }
 
-                pub fn add_chip(mut self,name:&str,chip:std::boxed::Box<dyn pcb_rs::HardwareModule>)->Self{
+                pub fn add_chip(mut self,name:&str,chip: std::boxed::Box<dyn pcb_rs::HardwareModule>)->Self{
                     self.added_chip_map.insert(name.to_string(),chip);
                     self
                 }
 
-                pub fn build(self)->std::result::Result<#pcb_name,String>{
+                pub fn build(self)->std::result::Result<#pcb_name, std::string::String>{
                     self.check_added_all_chips()?;
                     self.check_valid_chips()?;
 
-                    Ok(#pcb_name{})
+                    std::result::Result::Ok(#pcb_name{})
                 }
 
-                fn check_added_all_chips(&self)->Result<(),String>{
+                fn check_added_all_chips(&self)-> std::result::Result<(),std::string::String>{
                     for chip in [#(#chip_names),*]{
                         if !self.added_chip_map.contains_key(chip){
-                            return Err(format!("chip {} defined in pcb design, but not added",chip))
+                            return std::result::Result::Err(format!("chip {} defined in pcb design, but not added",chip))
                         }
                     }
-                    Ok(())
+                    std::result::Result::Ok(())
                 }
-                fn check_valid_chips(&self)->Result<(),String>{
+                fn check_valid_chips(&self)-> std::result::Result<(),std::string::String>{
                     #(#chip_pin_check)*
-                    Ok(())
+                    std::result::Result::Ok(())
                 }
 
-                fn check_valid_pin_connection(&self)->Result<(),String>{
+                fn check_valid_pin_connection(&self)->std::result::Result<(),std::string::String>{
                     #(#instantiate_chip_vars)*
                     #(#pin_connection_checks)*
                     
-                    Ok(())
+                    std::result::Result::Ok(())
                 }
 
             }

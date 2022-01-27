@@ -201,7 +201,7 @@ pub fn derive_chip_impl(name: &syn::Ident, data: &syn::DataStruct) -> TokenStrea
                 use std::boxed::Box;
                 match name{
                     #(#get_pin_match_arm,)*
-                    _ => None
+                    _ => std::option::Option::None
                 }
             }
 
