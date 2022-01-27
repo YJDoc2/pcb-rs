@@ -69,7 +69,11 @@ impl Parse for PcbMacroInput {
             let _ = <Token![::]>::parse(&content)?;
             let pin2 = syn::Ident::parse(&content)?.to_string();
             let _ = <Token![;]>::parse(&content)?;
-            
+
+            if (&chip1,&pin1) == (&chip2,&pin2){
+                let t =format!("attempted to connect a pin to itself : chip `{}` pin `{}` appears to have a self-connection, which is redundant",chip1,pin1);
+                return Err(syn::Error::new_spanned(&chip1,t));
+            }
 
             if !chip_map.contains_key(&chip1) {
                 let t = format!("use of undeclared chip {}", chip1);
