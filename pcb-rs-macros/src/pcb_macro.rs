@@ -245,11 +245,12 @@ impl PcbMacroInput {
             }
         });
 
-        // this will bind some variables to the actual entered chips
+        // this will bind some variables to the actual entered chips for the builder
         let instantiate_chip_vars = self.chip_map.iter().map(|(name, _)| {
             let __name = syn::Ident::new(&name, pcb_name.span());
             quote! {let #__name = self.added_chip_map.get(#name).unwrap().get_pin_list();}
         });
+
         
 
         let pin_connection_checks = self
@@ -308,9 +309,7 @@ impl PcbMacroInput {
         
 
         quote! {
-
-            struct #pcb_name{}
-
+            
             struct #builder_name{
                 added_chip_map:std::collections::HashMap<std::string::String,std::boxed::Box<dyn pcb_rs::HardwareModule>>,
                 shorted_pins:std::vec::Vec<std::vec::Vec<pcb_rs::ChipPin>>,
@@ -341,9 +340,10 @@ impl PcbMacroInput {
                     self.check_valid_pin_connection()?;
                     let pin_connections = self.get_pin_connections()?;
 
-
-
-                    std::result::Result::Ok(#pcb_name{})
+                    std::result::Result::Ok(#pcb_name{
+                        chips:self.added_chip_map,
+                        pin_connections
+                    })
                 }
 
                 fn check_added_all_chips(&self)-> std::result::Result<(),std::string::String>{
@@ -400,7 +400,7 @@ impl PcbMacroInput {
                         }else{
                             let pin_mds:Vec<(ChipPin,&PinMetadata)> = 
                                     group.iter().map(|pin|(*pin,self.pin_metadata_cache.get(pin).unwrap())).collect();
-
+                            // TODO consider or not consider IO pins here
                             // now here there are two possibilities, wither broadcast group or tristated group
                             let all_tristatable = pin_mds.iter().all(|(_,md)|md.tristatable);
                             let any_tristatable = pin_mds.iter().any(|(_,md)|md.tristatable);
@@ -456,6 +456,70 @@ impl PcbMacroInput {
                     Ok(ret)
                 }
 
+            }
+
+            struct #pcb_name{
+                chips:std::collections::HashMap<std::string::String,std::boxed::Box<dyn pcb_rs::HardwareModule>>,
+                pin_connections:std::vec::Vec<pcb_rs::ConnectedPins>
+            }
+
+            impl pcb_rs::Chip for #pcb_name{
+                fn tick(&mut self){
+                    use std::any::Any;
+                    use std::option::Option;
+                    use pcb_rs::{ChipPin,PinType,ConnectedPins,PinMetadata};
+
+
+                    for chip in self.chips.values_mut(){
+                        chip.tick();
+                    }
+
+                    for connection in &self.pin_connections{
+                        match connection{
+                            ConnectedPins::Pair{source,destination}=>{
+                                // because we have made sure the chips and pins exist properly,
+                                // we can unwrap directly
+                                let chip = self.chips.get(source.chip).unwrap();
+                                let val = chip.get_pin_value(source.pin).unwrap();
+                                let chip = self.chips.get_mut(destination.chip).unwrap();
+                                chip.set_pin_value(destination.pin,&val);
+                            }
+                            ConnectedPins::Broadcast{source,destinations}=>{
+                                let chip = self.chips.get(source.chip).unwrap();
+                                let val = chip.get_pin_value(source.pin).unwrap();
+                                for dest in destinations{
+                                    let chip = self.chips.get_mut(dest.chip).unwrap();
+                                    chip.set_pin_value(dest.pin,&val);
+                                }
+                            }
+                            ConnectedPins::Tristated{sources,destinations}=>{
+                                let mut val = Option::None;
+                                let mut active_chip = ChipPin{
+                                    chip: "unknown",
+                                    pin: "unknown",
+                                };
+                                for src in sources{
+                                    let chip = self.chips.get(src.chip).unwrap();
+                                    if !chip.is_pin_tristated(src.pin){
+                                        if val.is_some(){
+                                            panic!("Multiple pins found active at the same time in a tristated group : pin {:?} and pin {:?} in group {:?}. Only one pin in a tristated group can be active at a time",src, active_chip,connection);
+                                        }
+                                        active_chip = *src;
+                                        val = Option::Some(chip.get_pin_value(src.pin).unwrap());
+                                    }
+                                }
+                                if let Some(val) = val{
+                                    for dest in destinations{
+                                        let chip = self.chips.get_mut(dest.chip).unwrap();
+                                        chip.set_pin_value(dest.pin,&val);
+                                    }
+                                }
+                                
+                            }
+                        }
+                    }
+
+                }
             }
         }
     }

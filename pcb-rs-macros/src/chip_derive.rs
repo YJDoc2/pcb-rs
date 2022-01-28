@@ -220,7 +220,6 @@ pub fn derive_chip_impl(name: &syn::Ident, data: &syn::DataStruct) -> TokenStrea
                     _ => {false}
                 }
             }
-
         }
     }
 }
