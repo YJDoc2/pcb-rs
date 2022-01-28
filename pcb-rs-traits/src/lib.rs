@@ -19,6 +19,15 @@ pub struct PinMetadata {
     pub triastatable: bool,
 }
 
+#[derive(Debug, Hash)]
+/// Used to represent a specific pin of a specific chip
+/// in pcb! generated struct. Both fields are 'static , because
+/// when generating we know the names, and thus can be stored as static strings
+pub struct ChipPin {
+    pub chip: &'static str,
+    pub pin: &'static str,
+}
+
 impl PinMetadata {
     pub fn is_connectable(&self, other: &PinMetadata) -> bool {
         let both_input =

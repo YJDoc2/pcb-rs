@@ -5,11 +5,12 @@ pcb!(BasicComputer {
     chip memory;
     chip dma;
 
-    processor::address_bus - memory::address;
+    memory::address - processor::address_bus;
     memory::address - dma::address_bus;
     processor::data_bus - memory::data;
     processor::mem_mode - memory::op_mode;
     processor::mem_state - memory::active;
+    memory::data - dma::data_bus;
 
     expose memory::address;
     expose memory::data;

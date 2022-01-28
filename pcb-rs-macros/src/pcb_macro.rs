@@ -8,7 +8,7 @@ const CHIP_DEFINITION_KEYWORD: &str = "chip";
 const PIN_EXPOSE_KEYWORD: &str = "expose";
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-struct ChipPin {
+struct __ChipPin {
     chip: String,
     pin: String,
 }
@@ -17,8 +17,8 @@ struct ChipPin {
 pub struct PcbMacroInput {
     name: syn::Ident,
     chip_map: HashMap<String, Vec<String>>,
-    pin_connection_list: HashMap<ChipPin, HashSet<ChipPin>>,
-    exposed_pins: Vec<ChipPin>,
+    pin_connection_list: HashMap<__ChipPin, HashSet<__ChipPin>>,
+    exposed_pins: Vec<__ChipPin>,
 }
 
 impl Parse for PcbMacroInput {
@@ -31,9 +31,9 @@ impl Parse for PcbMacroInput {
 
         // this just stores a simple representation of connected pins,
         // we convert this into a better structure to store into the builder in the into function
-        let mut pin_connection_list: HashMap<ChipPin, HashSet<ChipPin>> = HashMap::new();
+        let mut pin_connection_list: HashMap<__ChipPin, HashSet<__ChipPin>> = HashMap::new();
 
-        let mut exposed_pins: Vec<ChipPin> = Vec::new();
+        let mut exposed_pins: Vec<__ChipPin> = Vec::new();
 
         // this parses the module
         loop {
@@ -92,11 +92,11 @@ impl Parse for PcbMacroInput {
             let t = chip_map.get_mut(&chip2).unwrap();
             t.push(pin2.clone());
 
-            let chip_pin1 = ChipPin {
+            let chip_pin1 = __ChipPin {
                 chip: chip1,
                 pin: pin1,
             };
-            let chip_pin2 = ChipPin {
+            let chip_pin2 = __ChipPin {
                 chip: chip2,
                 pin: pin2,
             };
@@ -137,7 +137,7 @@ impl Parse for PcbMacroInput {
                 let t = format!("use of undeclared chip in expose pin : {}", chip);
                 return Err(syn::Error::new_spanned(&chip,t));
             }
-            exposed_pins.push(ChipPin {
+            exposed_pins.push(__ChipPin {
                 chip: chip,
                 pin: pin,
             });
@@ -169,8 +169,64 @@ impl Into<proc_macro2::TokenStream> for PcbMacroInput {
 }
 
 impl PcbMacroInput {
+
+
+    // This might be more efficiently implemented, I think this has worst case O(n^2)?
+    fn get_short_pin_set(&self)->Vec<Vec<__ChipPin>>{
+        // first let us make a vec to store the initial pin connections
+        // generated from given param
+        let mut initial_collection = Vec::new();
+
+        // we fill that vec by pushing sets in the param, but adding the hashmap key to the set
+        // as we need set of connected pin, and the key-value structure doesn't make a difference
+        for (main,connected) in &self.pin_connection_list{
+            let mut t = connected.clone();
+            t.insert(main.clone());
+            initial_collection.push(t);
+        }
+
+        // this is the final return, which is the collection of groups of all the pins that are 
+        // shorted, i.e. connected electrically, so that voltage at any
+        // one fo the pins in the individual group will affect rest of the pins in that group
+        let mut shorted_pins = Vec::new();
+
+        loop{
+
+            // we take a set from the initial sets, if no sets are remaining,
+            // work is done
+            let mut set = match initial_collection.pop(){
+                Some(s)=>s,
+                None=>break
+            };
+            // a temp vector to store the groups which does not have any pins in common
+            // with the set above
+            let mut t = Vec::new();
+
+            // we check if any remaining set in the initial collection
+            // has a pin common with the set under consideration,
+            // if it does, we extend the set, else store that (remaining) set in 
+            // the temp vector
+            for s in initial_collection{
+                if set.intersection(&s).next().is_some(){
+                    set.extend(s.into_iter());
+                }else{
+                    t.push(s);
+                }
+            }
+
+            // not the set contains pins which are shorted, we store that in the return variable
+            shorted_pins.push(set.into_iter().collect());
+
+            // set the initial collection to temp, so it contains next candidates to check
+            initial_collection = t;
+        }
+
+        // return shorted pins
+        shorted_pins
+    }
+
     fn generate(self) -> proc_macro2::TokenStream {
-        let pcb_name = self.name;
+        let pcb_name = &self.name;
         let builder_name = quote::format_ident!("{}Builder", pcb_name);
 
         let chip_names = self.chip_map.iter().map(|(name, _)| quote! {#name});
@@ -224,19 +280,40 @@ impl PcbMacroInput {
                 }
             });
 
+        let shorted_pins = self.get_short_pin_set();
+        let shorted_pins_tokens = shorted_pins.iter().map(|group|{
+            let g = group.iter().map(|cp|{
+                let chip = &cp.chip;
+                let pin= &cp.pin;
+                quote!{
+                    pcb_rs::ChipPin{
+                        chip:#chip,
+                        pin:#pin
+                    }
+                }
+            });
+            quote!{
+                std::vec![#(#g),*]
+            }
+        });
+        
+
         quote! {
 
             struct #pcb_name{}
 
             struct #builder_name{
-                added_chip_map:std::collections::HashMap<std::string::String,std::boxed::Box<dyn pcb_rs::HardwareModule>>
+                added_chip_map:std::collections::HashMap<std::string::String,std::boxed::Box<dyn pcb_rs::HardwareModule>>,
+                shorted_pins:std::vec::Vec<std::vec::Vec<pcb_rs::ChipPin>>
             }
 
             impl #builder_name{
 
                 pub fn new()->Self{
+                    let shorted = std::vec![#(#shorted_pins_tokens),*];
                     Self{
-                        added_chip_map:std::collections::HashMap::new()
+                        added_chip_map:std::collections::HashMap::new(),
+                        shorted_pins:shorted,
                     }
                 }
 
