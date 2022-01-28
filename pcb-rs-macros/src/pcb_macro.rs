@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use syn::parse::{Parse, ParseStream};
 use syn::{Result, Token};
 // ! TODO Add better error reporting
+// ! TODO maybe refactor the pin validation fn, where it also sets the pin metadata?
 
 const CHIP_DEFINITION_KEYWORD: &str = "chip";
 const PIN_EXPOSE_KEYWORD: &str = "expose";
@@ -271,11 +272,19 @@ impl PcbMacroInput {
                                 )
                             )
                         }
+                        self.pin_metadata_cache.insert(pcb_rs::ChipPin{
+                            chip: #__chip,
+                            pin: #__pin
+                        },*__pin2);
                     }
                 });
 
                 quote! {
                     let __pin1 = #chip_ident.get(#_pin).unwrap();
+                    self.pin_metadata_cache.insert(pcb_rs::ChipPin{
+                        chip:#_chip,
+                        pin:#_pin
+                    },*__pin1);
                     #(#connected_pin_iter)*   
                 }
             });
@@ -304,7 +313,8 @@ impl PcbMacroInput {
 
             struct #builder_name{
                 added_chip_map:std::collections::HashMap<std::string::String,std::boxed::Box<dyn pcb_rs::HardwareModule>>,
-                shorted_pins:std::vec::Vec<std::vec::Vec<pcb_rs::ChipPin>>
+                shorted_pins:std::vec::Vec<std::vec::Vec<pcb_rs::ChipPin>>,
+                pin_metadata_cache:std::collections::HashMap<pcb_rs::ChipPin,pcb_rs::PinMetadata>
             }
 
             impl #builder_name{
@@ -314,6 +324,7 @@ impl PcbMacroInput {
                     Self{
                         added_chip_map:std::collections::HashMap::new(),
                         shorted_pins:shorted,
+                        pin_metadata_cache:std::collections::HashMap::new()
                     }
                 }
 
@@ -322,10 +333,14 @@ impl PcbMacroInput {
                     self
                 }
 
-                pub fn build(self)->std::result::Result<#pcb_name, std::string::String>{
+                pub fn build(mut self)->std::result::Result<#pcb_name, std::string::String>{
                     self.check_added_all_chips()?;
                     self.check_valid_chips()?;
+                    // this will validate pin connections as well as set up
+                    // the pin metadata in hashmap
                     self.check_valid_pin_connection()?;
+
+
 
                     std::result::Result::Ok(#pcb_name{})
                 }
@@ -343,7 +358,9 @@ impl PcbMacroInput {
                     std::result::Result::Ok(())
                 }
 
-                fn check_valid_pin_connection(&self)->std::result::Result<(),std::string::String>{
+                // yes this does two things by also setting the chip metadata in hashmap, but otherwise there
+                // would have been a lot of code duplication, so go with it for now
+                fn check_valid_pin_connection(&mut self)->std::result::Result<(),std::string::String>{
                     #(#instantiate_chip_vars)*
                     #(#pin_connection_checks)*
                     

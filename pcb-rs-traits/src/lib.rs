@@ -1,13 +1,13 @@
 use std::any::Any;
 use std::collections::HashMap;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum PinType {
     Input,
     Output,
     IO,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 /// This will store the metadata of the pin, for the encompassing
 /// module (usually generated using pcb!) to use. Reason that the data_type is
 /// &'static str is that when deriving the Chip using Chip derive macro,
@@ -19,7 +19,7 @@ pub struct PinMetadata {
     pub triastatable: bool,
 }
 
-#[derive(Debug, Hash)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 /// Used to represent a specific pin of a specific chip
 /// in pcb! generated struct. Both fields are 'static , because
 /// when generating we know the names, and thus can be stored as static strings
