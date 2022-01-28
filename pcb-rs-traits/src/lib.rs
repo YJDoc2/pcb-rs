@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PinType {
     Input,
     Output,
@@ -16,10 +16,10 @@ pub enum PinType {
 pub struct PinMetadata {
     pub pin_type: PinType,
     pub data_type: &'static str,
-    pub triastatable: bool,
+    pub tristatable: bool,
 }
 
-#[derive(Debug, Hash, PartialEq, Eq)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 /// Used to represent a specific pin of a specific chip
 /// in pcb! generated struct. Both fields are 'static , because
 /// when generating we know the names, and thus can be stored as static strings
@@ -28,13 +28,42 @@ pub struct ChipPin {
     pub pin: &'static str,
 }
 
+#[derive(Debug)]
+// NOTE: if you don't understand rest of this comment it is fine, even I'm a bit confused after writing it!
+// Note that in terms of the chip, a pin will be `output`, i.e. it will give out some data after tick()
+// ant the pins which are connected to such pins will be `input` pins, as they take the data before tick()
+// for the encompassing hardware module, this definition is kind of reversed in a sense, the pin which give out output are
+// are the input pins (termed source here) as we take their value after tick() and give it to some other pins, i.e.
+// they provide some input to other chips, and the pins which take it are output pins (termed destination),
+// i.e. they are supposed to receive the output. It is confusing, so here I just called it source and destination
+/// This enum represents three types of pin connections possible
+pub enum ConnectedPins {
+    /// indicates a one-to-one connections of a pin from a chip to another pin of a chip
+    Pair {
+        source: ChipPin,
+        destination: ChipPin,
+    },
+    /// indicates a group of shorted pins ,where a single pin is output type,
+    /// and its value is broadcasted to rest of the pins, which are either input or io types
+    Broadcast {
+        source: ChipPin,
+        destinations: Vec<ChipPin>,
+    },
+    /// indicates the group of connected tristated pins, with set of output/io types pins
+    /// connected to set of input/io pins
+    Tristated {
+        sources: Vec<ChipPin>,
+        destinations: Vec<ChipPin>,
+    },
+}
+
 impl PinMetadata {
     pub fn is_connectable(&self, other: &PinMetadata) -> bool {
         let both_input =
             matches!(self.pin_type, PinType::Input) && matches!(other.pin_type, PinType::Input);
         let both_output =
             matches!(self.pin_type, PinType::Output) && matches!(other.pin_type, PinType::Output);
-        let both_tristatable = self.triastatable ^ other.triastatable;
+        let both_tristatable = self.tristatable ^ other.tristatable;
         let both_same_type = self.data_type == other.data_type;
 
         // for pins to be connectable, both should NOT be input, both should NOT be output

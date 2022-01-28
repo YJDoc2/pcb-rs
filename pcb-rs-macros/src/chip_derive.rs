@@ -77,7 +77,7 @@ fn get_pin_metadata<'a>(fields: &'a [&syn::Field]) -> Result<Vec<__PinMetadata<'
 }
 
 fn pin_is_tristatable(ty: &syn::Type) -> bool {
-    // this is a soft check rather than a hard check if the pin is tristatabel
+    // this is a soft check rather than a hard check if the pin is tristatable
     // or not. Technically users can define an `Option` struct/enum in their code
     // which will still set this tristatable as true. But this allows a quick check
     // later in pcb! generated module to see if a pin can be tristatable or not.
@@ -136,13 +136,13 @@ pub fn derive_chip_impl(name: &syn::Ident, data: &syn::DataStruct) -> TokenStrea
         let __temp = p.data_type;
         let dtype = quote! {#__temp}.to_string();
 
-        let triastatable = pin_is_tristatable(__temp);
+        let tristatable = pin_is_tristatable(__temp);
 
         quote! {
             #name, pcb_rs::PinMetadata{
                 pin_type:pcb_rs::PinType::#ptype,
                 data_type:#dtype,
-                triastatable:#triastatable
+                tristatable:#tristatable
             }
         }
     });

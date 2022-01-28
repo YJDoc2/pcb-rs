@@ -339,6 +339,7 @@ impl PcbMacroInput {
                     // this will validate pin connections as well as set up
                     // the pin metadata in hashmap
                     self.check_valid_pin_connection()?;
+                    let pin_connections = self.get_pin_connections()?;
 
 
 
@@ -365,6 +366,94 @@ impl PcbMacroInput {
                     #(#pin_connection_checks)*
                     
                     std::result::Result::Ok(())
+                }
+
+                // This function can be optimized a bit by removing multiple iter() and map() calls
+                // some of might be redundant
+                fn get_pin_connections(&self)->std::result::Result<std::vec::Vec<pcb_rs::ConnectedPins>,std::string::String>{
+                    use std::vec::Vec;
+                    use pcb_rs::{ChipPin,PinType,ConnectedPins,PinMetadata};
+
+                    let mut ret:Vec<ConnectedPins> = Vec::with_capacity(self.shorted_pins.len());
+                    for group in &self.shorted_pins{
+                        if group.len() == 2{
+                            // this is a connected pair
+                            // and as we have verified the connection type before calling this function,
+                            // we can be sure that if one if of input type, other is output type
+                            let pin1 = group[0];
+                            let pin2 = group[1];
+                            let src:ChipPin;
+                            let dest:ChipPin;
+                            let pin1_md = self.pin_metadata_cache.get(&pin1).unwrap();
+                            // pin of type output (from chip's perspective) will be the source of data
+                            if pin1_md.pin_type == PinType::Output{
+                                src = pin1;
+                                dest = pin2;
+                            }else{
+                                src = pin2;
+                                dest = pin1;
+                            }
+                            ret.push(ConnectedPins::Pair{
+                                source:src,
+                                destination:dest
+                            });
+                        }else{
+                            let pin_mds:Vec<(ChipPin,&PinMetadata)> = 
+                                    group.iter().map(|pin|(*pin,self.pin_metadata_cache.get(pin).unwrap())).collect();
+
+                            // now here there are two possibilities, wither broadcast group or tristated group
+                            let all_tristatable = pin_mds.iter().all(|(_,md)|md.tristatable);
+                            let any_tristatable = pin_mds.iter().any(|(_,md)|md.tristatable);
+                            let multiple_outputs = {
+                                let t = pin_mds.iter().fold(0,|acc,(_,md)|{
+                                    if md.pin_type == PinType::Output{
+                                        acc +1
+                                    }else{
+                                        acc
+                                    }
+                                });
+                                t > 1
+                            };
+                            
+                            
+                            if !all_tristatable && multiple_outputs{
+                                return std::result::Result::Err(format!(
+                                    "multiple output pins found in a non-tristated pin group : {:#?}\nOnly groups where all pins are tristatable are allowed to have multiple output pins"
+                                    ,pin_mds));
+                            }
+                            // I'm not sure if this condition can ever occur, as we check each connected pin pairing,
+                            // and tristatable mark is like a colour, so that only tristatable pin can be connected to tristatable pins
+                            // but it is put here as a safety measure
+                            if !all_tristatable && any_tristatable{
+                                return std::result::Result::Err(format!(
+                                    "these pins are shorted, but not all are tristatable : {:#?}\nIf any pin a a shourted pin group is tristatable, then all must be tristatable"
+                                    ,pin_mds
+                                ));
+                            }
+
+                            // now, if there are multiple output pins, that means this must be a tristatable group
+                            // else a broadcast group
+
+                            if multiple_outputs{
+                                let src = pin_mds.iter().filter(|(_,md)|md.pin_type==PinType::Output).map(|(pin,_)|*pin).collect();
+                                let dest = pin_mds.iter().filter(|(_,md)|md.pin_type==PinType::Input).map(|(pin,_)|*pin).collect();
+                                ret.push(ConnectedPins::Tristated{
+                                    sources:src,
+                                    destinations:dest
+                                });
+                            }else{
+                                let src = pin_mds.iter().filter(|(pin,md)|md.pin_type==PinType::Output).map(|(pin,_)|*pin).next().unwrap();
+                                let dest = pin_mds.iter().filter(|(pin,md)|md.pin_type==PinType::Input).map(|(pin,_)|*pin).collect();
+                                ret.push(ConnectedPins::Broadcast{
+                                    source:src,
+                                    destinations:dest
+                                });
+                            }
+                            
+                        }
+                    }
+
+                    Ok(ret)
                 }
 
             }
