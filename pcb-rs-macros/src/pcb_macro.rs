@@ -513,10 +513,13 @@ impl PcbMacroInput {
                                 // both of which are of respective types, so even if they're tristated,
                                 //  their data types will match, and there won't be an issue
                                 // TODO implement a test to verify this 
-                                let chip = self.chips.get(source.chip).unwrap();
-                                let val = chip.get_pin_value(source.pin).unwrap();
-                                let chip = self.chips.get_mut(destination.chip).unwrap();
-                                chip.set_pin_value(destination.pin,&val);
+                                let src = self.chips.get(source.chip).unwrap();
+                                let val = src.get_pin_value(source.pin).unwrap();
+                                // we have to take it as ref, otherwise the box is passed around,
+                                // instead of the data which we want
+                                let data_ref = val.as_ref();
+                                let dest = self.chips.get_mut(destination.chip).unwrap();
+                                dest.set_pin_value(destination.pin,data_ref);
                             }
                             ConnectedPins::Broadcast{source,destinations}=>{
                                 // now this can get tricky, as the source pin might be of type
@@ -528,6 +531,7 @@ impl PcbMacroInput {
                                 // whatever its value is regardless
                                 let chip = self.chips.get(source.chip).unwrap();
                                 let val = chip.get_pin_value(source.pin).unwrap();
+                                let data_ref = val.as_ref();
                                 for dest in destinations{
                                     if dest == source{
                                         // accounts for the io type source pin
@@ -536,7 +540,7 @@ impl PcbMacroInput {
                                     let chip = self.chips.get_mut(dest.chip).unwrap();
                                     // we don't have to check if any other pin is of io type, because if it was
                                     // then taht set-up would be in the tristated group
-                                    chip.set_pin_value(dest.pin,&val);
+                                    chip.set_pin_value(dest.pin,data_ref);
                                 }
                             }
                             ConnectedPins::Tristated{sources,destinations}=>{
@@ -559,6 +563,7 @@ impl PcbMacroInput {
                                     }
                                 }
                                 if let Some(val) = val{
+                                    let data_ref = val.as_ref();
                                     for dest in destinations{
                                         // skip in case the pin is io type and present in both source and destinations
                                         if *dest == active_chip{
@@ -569,7 +574,7 @@ impl PcbMacroInput {
                                         if chip.is_pin_tristated(dest.pin){
                                             continue;
                                         }
-                                        chip.set_pin_value(dest.pin,&val);
+                                        chip.set_pin_value(dest.pin,data_ref);
                                     }
                                 }
                                 
