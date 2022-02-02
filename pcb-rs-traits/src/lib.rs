@@ -119,6 +119,9 @@ pub trait ChipInterface {
     // which does not depend on syn/quote libs.
     /// This is used to check if a tristatable pin is tristated or not
     fn is_pin_tristated(&self, name: &str) -> bool;
+
+    /// This returns if the io pin is in input mode or not, and false for other pins
+    fn in_input_mode(&self, name: &str) -> bool;
 }
 
 /// This is intended to be implemented manually by user

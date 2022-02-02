@@ -1,20 +1,42 @@
-use pcb_rs_traits::PinType;
 use proc_macro2::TokenStream;
 use quote::quote;
 
 const PIN_ATTRIBUTE: &str = "pin";
 
 const INVALID_PIN_ATTR_ERR: &str =
-    "invalid pin attribute, currently only #[pin(input|output|io)] is supported";
+    "invalid pin attribute, currently only #[pin(input|output|io,latch)] is supported";
+
+const INVALID_LATCH_ERR:&str = "invalid pin attribute, expected a latch pin name for io pin type : #[pin(io,<latch_pin_name>)]";
 
 const PIN_TYPE_INPUT: &str = "input";
 const PIN_TYPE_OUTPUT: &str = "output";
 const PIN_TYPE_IO: &str = "io";
 
 #[derive(Debug)]
+enum __PinType {
+    Input,
+    Output,
+    IO(syn::Ident),
+}
+
+impl std::fmt::Display for __PinType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                __PinType::Input => "Input",
+                __PinType::Output => "Output",
+                __PinType::IO(_) => "IO",
+            }
+        )
+    }
+}
+
+#[derive(Debug)]
 struct __PinMetadata<'a> {
     name: &'a syn::Ident,
-    pin_type: PinType,
+    pin_type: __PinType,
     data_type: &'a syn::Type,
 }
 
@@ -38,17 +60,27 @@ where
     syn::Error::new_spanned(t, m).to_compile_error()
 }
 
-fn get_pin_type(nm: syn::NestedMeta) -> Result<PinType, TokenStream> {
+fn get_pin_type(
+    nm: syn::NestedMeta,
+    latch: Option<syn::NestedMeta>,
+) -> Result<__PinType, TokenStream> {
     match nm {
         syn::NestedMeta::Meta(syn::Meta::Path(mut path)) => {
-            if path.segments.len() != 1 {
-                return Err(get_compiler_error(path, INVALID_PIN_ATTR_ERR));
-            }
             let ptype = path.segments.pop().unwrap().into_value().ident;
             match ptype.to_string().as_str() {
-                PIN_TYPE_INPUT => Ok(PinType::Input),
-                PIN_TYPE_OUTPUT => Ok(PinType::Output),
-                PIN_TYPE_IO => Ok(PinType::IO),
+                PIN_TYPE_INPUT => Ok(__PinType::Input),
+                PIN_TYPE_OUTPUT => Ok(__PinType::Output),
+                PIN_TYPE_IO => {
+                    if let Some(syn::NestedMeta::Meta(syn::Meta::Path(mut path))) = latch {
+                        if path.segments.len() != 1 {
+                            return Err(get_compiler_error(path, INVALID_LATCH_ERR));
+                        }
+                        let t = path.segments.pop().unwrap().into_value();
+                        Ok(__PinType::IO(t.ident))
+                    } else {
+                        return Err(get_compiler_error(path, INVALID_LATCH_ERR));
+                    }
+                }
                 _ => return Err(get_compiler_error(ptype, INVALID_PIN_ATTR_ERR)),
             }
         }
@@ -63,7 +95,18 @@ fn get_pin_metadata<'a>(fields: &'a [&syn::Field]) -> Result<Vec<__PinMetadata<'
         match pin_attr.parse_meta() {
             Err(e) => return Err(e.to_compile_error()),
             Ok(syn::Meta::List(mut args)) => {
-                let pin_type = get_pin_type(args.nested.pop().unwrap().into_value())?;
+                let pin_type_attr;
+                let latch;
+                if args.nested.len() == 1 {
+                    latch = None;
+                    pin_type_attr = args.nested.pop().unwrap().into_value();
+                } else {
+                    // as pop removes in reverse order, first we get latch and then io
+                    latch = args.nested.pop().map(|s| s.into_value());
+                    pin_type_attr = args.nested.pop().unwrap().into_value();
+                }
+
+                let pin_type = get_pin_type(pin_type_attr, latch)?;
                 ret.push(__PinMetadata {
                     name: &field.ident.as_ref().unwrap(),
                     pin_type: pin_type,
@@ -185,6 +228,21 @@ pub fn derive_chip_impl(name: &syn::Ident, data: &syn::DataStruct) -> TokenStrea
         }
     });
 
+    let latch_match_arm = metadata
+        .iter()
+        .filter(|s| matches!(s.pin_type, __PinType::IO(_)))
+        .map(|p| {
+            let name = p.name;
+            let name_string = name.to_string();
+            let latch_pin = match &p.pin_type {
+                __PinType::IO(pin) => pin,
+                _ => unreachable!(),
+            };
+            quote! {
+                #name_string => self.#latch_pin
+            }
+        });
+
     quote! {
         impl pcb_rs::ChipInterface for #name{
 
@@ -218,6 +276,13 @@ pub fn derive_chip_impl(name: &syn::Ident, data: &syn::DataStruct) -> TokenStrea
                 match name{
                     #(#tristated_match_arm,)*
                     _ => {false}
+                }
+            }
+
+            fn in_input_mode(&self,name:&str)->bool{
+                match name{
+                    #(#latch_match_arm,)*
+                    _ => false
                 }
             }
         }
