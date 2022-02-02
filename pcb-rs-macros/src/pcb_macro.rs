@@ -306,6 +306,63 @@ impl PcbMacroInput {
                 std::vec![#(#g),*]
             }
         });
+
+        // ci is ChipInterface
+        
+        let ci_pin_map = self.exposed_pins.iter().map(|cp|{
+            let pin_name = &cp.pin;
+            let chip_name = &cp.chip;
+            quote!{
+                let __chip = self.chips.get(#chip_name).unwrap();
+                let md = __chip.get_pin_list().get(#pin_name).unwrap().clone();
+                ret.insert(#pin_name,md);
+            }
+        });
+
+        let ci_get_value = self.exposed_pins.iter().map(|cp|{
+            let pin_name = &cp.pin;
+            let chip_name = &cp.chip;
+            quote!{
+                #pin_name =>{
+                    let __chip = self.chips.get(#chip_name).unwrap();
+                    return __chip.get_pin_value(#pin_name);
+                }
+            }
+        });
+
+        let ci_set_value = self.exposed_pins.iter().map(|cp|{
+            let pin_name = &cp.pin;
+            let chip_name = &cp.chip;
+            quote!{
+                #pin_name =>{
+                    let __chip = self.chips.get_mut(#chip_name).unwrap();
+                    return __chip.set_pin_value(#pin_name,val);
+                }
+            }
+        });
+
+        let ci_pin_tristated = self.exposed_pins.iter().map(|cp|{
+            let pin_name = &cp.pin;
+            let chip_name = &cp.chip;
+            quote!{
+                #pin_name =>{
+                    let __chip = self.chips.get(#chip_name).unwrap();
+                    return __chip.is_pin_tristated(#pin_name);
+                }
+            }
+        });
+
+        let ci_pin_input_mode = self.exposed_pins.iter().map(|cp|{
+            let pin_name = &cp.pin;
+            let chip_name = &cp.chip;
+            quote!{
+                #pin_name =>{
+                    let __chip = self.chips.get(#chip_name).unwrap();
+                    return __chip.in_input_mode(#pin_name);
+                }
+            }
+        });
+        
         
 
         quote! {
@@ -397,6 +454,43 @@ impl PcbMacroInput {
             struct #pcb_name{
                 chips:std::collections::HashMap<std::string::String,std::boxed::Box<dyn pcb_rs::HardwareModule>>,
                 pin_connections:std::vec::Vec<pcb_rs::ConnectedPins>
+            }
+
+            impl pcb_rs::ChipInterface for #pcb_name{
+                
+                fn get_pin_list(&self) -> std::collections::HashMap<&'static str, pcb_rs::PinMetadata>{
+                    let mut ret = std::collections::HashMap::new();
+                    #(#ci_pin_map)*
+                    ret
+                }
+                
+                fn get_pin_value(&self, name: &str) -> std::option::Option<Box<dyn std::any::Any>>{
+                    match name{
+                        #(#ci_get_value),*
+                        _ => None
+                    }
+                }
+                
+                fn set_pin_value(&mut self, name: &str, val: &dyn std::any::Any){
+                    match name{
+                        #(#ci_set_value),*
+                        _ => {}
+                    }
+                }
+                
+                fn is_pin_tristated(&self, name: &str) -> bool{
+                    match name{
+                        #(#ci_pin_tristated),*
+                        _ => false
+                    }
+                }
+                
+                fn in_input_mode(&self, name: &str) -> bool{
+                    match name{
+                        #(#ci_pin_input_mode),*
+                        _ => false
+                    }
+                }
             }
 
             impl pcb_rs::Chip for #pcb_name{
