@@ -29,3 +29,11 @@ unfortunately as the type information is not resolved at macro expansion time (a
 - std::option::Option and Option would not be treated as he same type
 
 As their string representations are different. Note that this can result in errors at runtime (i.e. after building the pcb) as `Option` can mean two different types in two different files. I don't know how to solve that currently, so better to use fully explicit types except for primitive datatypes.
+
+## note on use of io pins
+
+this lib is a bit opinionated when it comes to io type of pins. One should declare a pin IO type only when it will be used for both input and output. Do not use io for every pin, and the latch variable of each io pin should be kept as a non-pin member of the struct, and it should not be exposed. It should strictly be of bool type.
+
+## note on pin tristating
+
+the input pins must never be tristated, unless you want the input to be ignored. Tristating the input type tristatable pins will make the pcb not send them the value of connected output pins, as in real life tristating acts as if the pin is removed from the board, and the skip, therefore, is meant to be similar to that behavior

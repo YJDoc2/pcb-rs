@@ -1,6 +1,9 @@
 use std::any::Any;
 use std::collections::HashMap;
 
+mod util;
+pub use util::get_pin_group;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PinType {
     Input,

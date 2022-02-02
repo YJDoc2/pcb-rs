@@ -275,7 +275,7 @@ impl PcbMacroInput {
                         }
                         self.pin_metadata_cache.insert(pcb_rs::ChipPin{
                             chip: #__chip,
-                            pin: #__pin
+                            pin: #__pin,
                         },*__pin2);
                     }
                 });
@@ -376,81 +376,17 @@ impl PcbMacroInput {
 
                     let mut ret:Vec<ConnectedPins> = Vec::with_capacity(self.shorted_pins.len());
                     for group in &self.shorted_pins{
-                        if group.len() == 2{
-                            // this is a connected pair
-                            // and as we have verified the connection type before calling this function,
-                            // we can be sure that if one if of input type, other is output type
-                            let pin1 = group[0];
-                            let pin2 = group[1];
-                            let src:ChipPin;
-                            let dest:ChipPin;
-                            let pin1_md = self.pin_metadata_cache.get(&pin1).unwrap();
-                            // pin of type output (from chip's perspective) will be the source of data
-                            if pin1_md.pin_type == PinType::Output{
-                                src = pin1;
-                                dest = pin2;
-                            }else{
-                                src = pin2;
-                                dest = pin1;
-                            }
-                            ret.push(ConnectedPins::Pair{
-                                source:src,
-                                destination:dest
-                            });
-                        }else{
-                            let pin_mds:Vec<(ChipPin,&PinMetadata)> = 
-                                    group.iter().map(|pin|(*pin,self.pin_metadata_cache.get(pin).unwrap())).collect();
-                            // TODO consider or not consider IO pins here
-                            // now here there are two possibilities, wither broadcast group or tristated group
-                            let all_tristatable = pin_mds.iter().all(|(_,md)|md.tristatable);
-                            let any_tristatable = pin_mds.iter().any(|(_,md)|md.tristatable);
-                            let multiple_outputs = {
-                                let t = pin_mds.iter().fold(0,|acc,(_,md)|{
-                                    if md.pin_type == PinType::Output{
-                                        acc +1
-                                    }else{
-                                        acc
-                                    }
-                                });
-                                t > 1
-                            };
-                            
-                            
-                            if !all_tristatable && multiple_outputs{
-                                return std::result::Result::Err(format!(
-                                    "multiple output pins found in a non-tristated pin group : {:#?}\nOnly groups where all pins are tristatable are allowed to have multiple output pins"
-                                    ,pin_mds));
-                            }
-                            // I'm not sure if this condition can ever occur, as we check each connected pin pairing,
-                            // and tristatable mark is like a colour, so that only tristatable pin can be connected to tristatable pins
-                            // but it is put here as a safety measure
-                            if !all_tristatable && any_tristatable{
-                                return std::result::Result::Err(format!(
-                                    "these pins are shorted, but not all are tristatable : {:#?}\nIf any pin a a shourted pin group is tristatable, then all must be tristatable"
-                                    ,pin_mds
-                                ));
-                            }
+                        let input_pins = group.iter().filter(|pin|{
+                            let md = self.pin_metadata_cache.get(pin).unwrap();
+                            matches!(md.pin_type,pcb_rs::PinType::Input) || matches!(md.pin_type,pcb_rs::PinType::IO)
+                        }).map(|pin|(*pin,self.pin_metadata_cache.get(pin).unwrap())).collect();
 
-                            // now, if there are multiple output pins, that means this must be a tristatable group
-                            // else a broadcast group
-
-                            if multiple_outputs{
-                                let src = pin_mds.iter().filter(|(_,md)|md.pin_type==PinType::Output).map(|(pin,_)|*pin).collect();
-                                let dest = pin_mds.iter().filter(|(_,md)|md.pin_type==PinType::Input).map(|(pin,_)|*pin).collect();
-                                ret.push(ConnectedPins::Tristated{
-                                    sources:src,
-                                    destinations:dest
-                                });
-                            }else{
-                                let src = pin_mds.iter().filter(|(pin,md)|md.pin_type==PinType::Output).map(|(pin,_)|*pin).next().unwrap();
-                                let dest = pin_mds.iter().filter(|(pin,md)|md.pin_type==PinType::Input).map(|(pin,_)|*pin).collect();
-                                ret.push(ConnectedPins::Broadcast{
-                                    source:src,
-                                    destinations:dest
-                                });
-                            }
-                            
-                        }
+                        let output_pins = group.iter().filter(|pin|{
+                            let md = self.pin_metadata_cache.get(pin).unwrap();
+                            matches!(md.pin_type,pcb_rs::PinType::Output) || matches!(md.pin_type,pcb_rs::PinType::IO)
+                        }).map(|pin|(*pin,self.pin_metadata_cache.get(pin).unwrap())).collect();
+                        
+                        ret.push(pcb_rs::get_pin_group(input_pins,output_pins)?);
                     }
 
                     Ok(ret)
@@ -479,16 +415,33 @@ impl PcbMacroInput {
                             ConnectedPins::Pair{source,destination}=>{
                                 // because we have made sure the chips and pins exist properly,
                                 // we can unwrap directly
+                                // also this is simplest, as there is a single input and single output pin,
+                                // both of which are of respective types, so even if they're tristated,
+                                //  their data types will match, and there won't be an issue
+                                // TODO implement a test to verify this 
                                 let chip = self.chips.get(source.chip).unwrap();
                                 let val = chip.get_pin_value(source.pin).unwrap();
                                 let chip = self.chips.get_mut(destination.chip).unwrap();
                                 chip.set_pin_value(destination.pin,&val);
                             }
                             ConnectedPins::Broadcast{source,destinations}=>{
+                                // now this can get tricky, as the source pin might be of type
+                                // io, so it can be present in destinations as well, so we have to skip it
+                                // as well as check that if there is any destination pin that is 
+                                // io type, then it is set to input mode
+                                // also we do not check if the source pin, if of io type
+                                // is set to input mode or not, the destination pins will get 
+                                // whatever its value is regardless
                                 let chip = self.chips.get(source.chip).unwrap();
                                 let val = chip.get_pin_value(source.pin).unwrap();
                                 for dest in destinations{
+                                    if dest == source{
+                                        // accounts for the io type source pin
+                                        continue;
+                                    }
                                     let chip = self.chips.get_mut(dest.chip).unwrap();
+                                    // we don't have to check if any other pin is of io type, because if it was
+                                    // then taht set-up would be in the tristated group
                                     chip.set_pin_value(dest.pin,&val);
                                 }
                             }
@@ -500,7 +453,10 @@ impl PcbMacroInput {
                                 };
                                 for src in sources{
                                     let chip = self.chips.get(src.chip).unwrap();
-                                    if !chip.is_pin_tristated(src.pin){
+                                    // input mode check if specifically for io pins, which would be present in
+                                    // both sources and destinations, and if one want to get the data in io pin
+                                    // the pin must not be in tristated mode, but must be in input mode
+                                    if !chip.in_input_mode(src.pin) && !chip.is_pin_tristated(src.pin){
                                         if val.is_some(){
                                             panic!("Multiple pins found active at the same time in a tristated group : pin {:?} and pin {:?} in group {:?}. Only one pin in a tristated group can be active at a time",src, active_chip,connection);
                                         }
@@ -510,7 +466,15 @@ impl PcbMacroInput {
                                 }
                                 if let Some(val) = val{
                                     for dest in destinations{
+                                        // skip in case the pin is io type and present in both source and destinations
+                                        if *dest == active_chip{
+                                            continue;
+                                        }
                                         let chip = self.chips.get_mut(dest.chip).unwrap();
+                                        // skip tristated pins
+                                        if chip.is_pin_tristated(dest.pin){
+                                            continue;
+                                        }
                                         chip.set_pin_value(dest.pin,&val);
                                     }
                                 }
