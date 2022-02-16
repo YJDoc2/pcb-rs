@@ -1,3 +1,4 @@
+use downcast_rs::{impl_downcast, Downcast}; // TODO someday remove this dependency and implement the feature in this crate itself
 use std::any::Any;
 use std::collections::HashMap;
 
@@ -149,6 +150,12 @@ pub trait Chip {
 }
 
 /// This trait is used to create trait objects to store in the pcb created by the pbc! macro
-pub trait HardwareModule: ChipInterface + Chip {}
+/// This currently uses downcast-rs so we can store the chips as dyn HardwareModule, but
+/// are able to downcast to concrete type if needed by user.
+// TODO this functionality should be implementable in this crate itself without needing downcast-rs,
+// TODO but I tried and couldn't  so using it to save time for now \O/
+pub trait HardwareModule: ChipInterface + Chip + Downcast {}
 
-impl<T> HardwareModule for T where T: ChipInterface + Chip {}
+impl_downcast!(HardwareModule);
+
+impl<T> HardwareModule for T where T: ChipInterface + Chip + Downcast {}

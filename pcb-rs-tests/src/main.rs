@@ -51,6 +51,10 @@ fn main() {
         .add_chip("tc1", tc1)
         .add_chip("tc2", tc2);
     let mut test_pcb = temp.build().unwrap();
+
+    let t: &TestChip1 = test_pcb.get_chip("tc1").unwrap();
+    let t: &mut TestChip2 = test_pcb.get_chip_mut("tc2").unwrap();
+
     for _ in 0..8 {
         test_pcb.tick();
     }

@@ -456,6 +456,26 @@ impl PcbMacroInput {
                 pin_connections:std::vec::Vec<pcb_rs::ConnectedPins>
             }
 
+            impl #pcb_name{
+                pub fn get_chip<'s,T:pcb_rs::HardwareModule>(&'s self,chip:&str)->std::option::Option<&'s T>{
+                    match self.chips.get(chip){
+                        std::option::Option::None => None,
+                        Some(c)=>{
+                            c.downcast_ref()
+                        }
+                    }
+                }
+
+                pub fn get_chip_mut<'s,T:pcb_rs::HardwareModule>(&'s mut self,chip:&str)->std::option::Option<&'s mut T>{
+                    match self.chips.get_mut(chip){
+                        std::option::Option::None => None,
+                        Some(c)=>{
+                            c.downcast_mut()
+                        }
+                    }
+                }
+            }
+
             impl pcb_rs::ChipInterface for #pcb_name{
                 
                 fn get_pin_list(&self) -> std::collections::HashMap<&'static str, pcb_rs::PinMetadata>{
