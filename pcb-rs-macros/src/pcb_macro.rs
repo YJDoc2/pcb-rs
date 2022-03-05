@@ -72,7 +72,7 @@ impl Parse for PcbMacroInput {
             let _ = <Token![;]>::parse(&content)?;
 
             if (&chip1,&pin1) == (&chip2,&pin2){
-                let t =format!("attempted to connect a pin to itself : chip `{}` pin `{}` appears to have a self-connection, which is redundant",chip1,pin1);
+                let t = format!("attempted to connect a pin to itself : chip `{}` pin `{}` appears to have a self-connection, which is redundant",chip1,pin1);
                 return Err(syn::Error::new_spanned(&chip1,t));
             }
 
@@ -233,6 +233,9 @@ impl PcbMacroInput {
         let chip_names = self.chip_map.iter().map(|(name, _)| quote! {#name});
 
         let chip_pin_check = self.chip_map.iter().map(|(name,pins)|{
+            if pins.is_empty(){
+                return quote!{};
+            }
             let pin_names = pins.iter().map(|n|{quote!{#n}});
             quote!{
                 let chip = self.added_chip_map.get(#name).unwrap();
