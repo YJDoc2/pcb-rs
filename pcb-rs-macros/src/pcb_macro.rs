@@ -19,7 +19,7 @@ pub struct PcbMacroInput {
     name: syn::Ident,
     chip_map: HashMap<String, Vec<String>>,
     pin_connection_list: HashMap<__ChipPin, HashSet<__ChipPin>>,
-    exposed_pins: Vec<__ChipPin>,
+    exposed_pins: Vec<(__ChipPin,String)>,
 }
 
 impl Parse for PcbMacroInput {
@@ -34,7 +34,7 @@ impl Parse for PcbMacroInput {
         // we convert this into a better structure to store into the builder in the into function
         let mut pin_connection_list: HashMap<__ChipPin, HashSet<__ChipPin>> = HashMap::new();
 
-        let mut exposed_pins: Vec<__ChipPin> = Vec::new();
+        let mut exposed_pins: Vec<(__ChipPin,String)> = Vec::new();
 
         // this parses the module
         loop {
@@ -52,11 +52,11 @@ impl Parse for PcbMacroInput {
             
         }
 
-        if kw == PIN_EXPOSE_KEYWORD {
-            return Err(syn::Error::new_spanned(&name,"there are no pin connections in this pcb!"));   
-        }
+        // we allow pcb with no connections as one might use pcb as a
+        // convenient collection of chips
 
         // here the kw will actually point to name of chip, for pin connections
+        // unless there are no connections, in which case it will break on first iter
         loop {
             if kw == PIN_EXPOSE_KEYWORD {
                 break;
@@ -133,15 +133,17 @@ impl Parse for PcbMacroInput {
             let chip = syn::Ident::parse(&content)?.to_string();
             let _ = <Token![::]>::parse(&content)?;
             let pin = syn::Ident::parse(&content)?.to_string();
+            let  _ = <Token![as]>::parse(&content)?;
+            let as_name = syn::Ident::parse(&content)?.to_string();
             let _ = <Token![;]>::parse(&content);
             if !chip_map.contains_key(&chip) {
                 let t = format!("use of undeclared chip in expose pin : {}", chip);
                 return Err(syn::Error::new_spanned(&chip,t));
             }
-            exposed_pins.push(__ChipPin {
+            exposed_pins.push((__ChipPin {
                 chip: chip,
                 pin: pin,
-            });
+            },as_name));
             match syn::Ident::parse(&content) {
                 Result::Ok(i) => {
                     if i != PIN_EXPOSE_KEYWORD {
@@ -248,10 +250,16 @@ impl PcbMacroInput {
             }
         });
 
+        // TODO improve this!
         // this will bind some variables to the actual entered chips for the builder
         let instantiate_chip_vars = self.chip_map.iter().map(|(name, _)| {
-            let __name = syn::Ident::new(&name, pcb_name.span());
-            quote! {let #__name = self.added_chip_map.get(#name).unwrap().get_pin_list();}
+            if self.pin_connection_list.is_empty(){
+                quote!{}
+            }else{
+                
+                let __name = quote::format_ident!("_{}",&name);
+                quote! {let #__name = self.added_chip_map.get(#name).unwrap().get_pin_list();}
+            }
         });
 
         
@@ -262,11 +270,11 @@ impl PcbMacroInput {
             .map(|(pin, connected_pins)| {
                 let _chip = &pin.chip;
                 let _pin = &pin.pin;
-                let chip_ident = syn::Ident::new(&_chip, pcb_name.span());
+                let chip_ident = quote::format_ident!("_{}",_chip);
                 let connected_pin_iter = connected_pins.iter().map(|pin| {
                     let __chip = &pin.chip;
                     let __pin = &pin.pin;
-                    let chip_ident = syn::Ident::new(__chip,pcb_name.span());
+                    let chip_ident = quote::format_ident!("_{}",__chip);
                     quote! {
                         let __pin2 = #chip_ident.get(#__pin).unwrap();
                         if !__pin1.is_connectable(__pin2){
@@ -312,54 +320,54 @@ impl PcbMacroInput {
 
         // ci is ChipInterface
         
-        let ci_pin_map = self.exposed_pins.iter().map(|cp|{
+        let ci_pin_map = self.exposed_pins.iter().map(|(cp,as_name)|{
             let pin_name = &cp.pin;
             let chip_name = &cp.chip;
             quote!{
                 let __chip = self.chips.get(#chip_name).unwrap();
                 let md = __chip.get_pin_list().get(#pin_name).unwrap().clone();
-                ret.insert(#pin_name,md);
+                ret.insert(#as_name,md);
             }
         });
 
-        let ci_get_value = self.exposed_pins.iter().map(|cp|{
+        let ci_get_value = self.exposed_pins.iter().map(|(cp,as_name)|{
             let pin_name = &cp.pin;
             let chip_name = &cp.chip;
             quote!{
-                #pin_name =>{
+                #as_name =>{
                     let __chip = self.chips.get(#chip_name).unwrap();
                     return __chip.get_pin_value(#pin_name);
                 }
             }
         });
 
-        let ci_set_value = self.exposed_pins.iter().map(|cp|{
+        let ci_set_value = self.exposed_pins.iter().map(|(cp,as_name)|{
             let pin_name = &cp.pin;
             let chip_name = &cp.chip;
             quote!{
-                #pin_name =>{
+                #as_name =>{
                     let __chip = self.chips.get_mut(#chip_name).unwrap();
                     return __chip.set_pin_value(#pin_name,val);
                 }
             }
         });
 
-        let ci_pin_tristated = self.exposed_pins.iter().map(|cp|{
+        let ci_pin_tristated = self.exposed_pins.iter().map(|(cp,as_name)|{
             let pin_name = &cp.pin;
             let chip_name = &cp.chip;
             quote!{
-                #pin_name =>{
+                #as_name =>{
                     let __chip = self.chips.get(#chip_name).unwrap();
                     return __chip.is_pin_tristated(#pin_name);
                 }
             }
         });
 
-        let ci_pin_input_mode = self.exposed_pins.iter().map(|cp|{
+        let ci_pin_input_mode = self.exposed_pins.iter().map(|(cp,as_name)|{
             let pin_name = &cp.pin;
             let chip_name = &cp.chip;
             quote!{
-                #pin_name =>{
+                #as_name =>{
                     let __chip = self.chips.get(#chip_name).unwrap();
                     return __chip.in_input_mode(#pin_name);
                 }
