@@ -14,12 +14,18 @@ struct __ChipPin {
     pin: String,
 }
 
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+struct __ExposedPins{
+    pins:Vec<__ChipPin>,
+    as_name:String
+}
+
 #[derive(Debug)]
 pub struct PcbMacroInput {
     name: syn::Ident,
     chip_map: HashMap<String, Vec<String>>,
     pin_connection_list: HashMap<__ChipPin, HashSet<__ChipPin>>,
-    exposed_pins: Vec<(__ChipPin,String)>,
+    exposed_pins: Vec<__ExposedPins>,
 }
 
 impl Parse for PcbMacroInput {
@@ -34,7 +40,7 @@ impl Parse for PcbMacroInput {
         // we convert this into a better structure to store into the builder in the into function
         let mut pin_connection_list: HashMap<__ChipPin, HashSet<__ChipPin>> = HashMap::new();
 
-        let mut exposed_pins: Vec<(__ChipPin,String)> = Vec::new();
+        let mut exposed_pins: Vec<__ExposedPins> = Vec::new();
 
         // this parses the module
         loop {
@@ -133,17 +139,41 @@ impl Parse for PcbMacroInput {
             let chip = syn::Ident::parse(&content)?.to_string();
             let _ = <Token![::]>::parse(&content)?;
             let pin = syn::Ident::parse(&content)?.to_string();
-            let  _ = <Token![as]>::parse(&content)?;
-            let as_name = syn::Ident::parse(&content)?.to_string();
-            let _ = <Token![;]>::parse(&content);
             if !chip_map.contains_key(&chip) {
                 let t = format!("use of undeclared chip in expose pin : {}", chip);
                 return Err(syn::Error::new_spanned(&chip,t));
             }
-            exposed_pins.push((__ChipPin {
-                chip: chip,
-                pin: pin,
-            },as_name));
+
+            let mut pins = vec![__ChipPin{
+                chip,pin
+            }];
+            // if we have something like `expose c1::p1,c2::p1 as p3;`
+            if content.peek(Token![,]){
+                // we do have it like `expose c1::p1,c2::p1 as p3;`
+                loop{
+                    let _ = <Token![,]>::parse(&content)?;
+                    let chip = syn::Ident::parse(&content)?.to_string();
+                        let _ = <Token![::]>::parse(&content)?;
+                        let pin = syn::Ident::parse(&content)?.to_string();
+                        if !chip_map.contains_key(&chip) {
+                            let t = format!("use of undeclared chip in expose pin : {}", chip);
+                            return Err(syn::Error::new_spanned(&chip,t));
+                        }
+                        pins.push(__ChipPin{chip,pin});
+                        // if we have a comma, there are more pins, else we can exit the loop
+                        if content.peek(Token![,]){
+                            continue;
+                        }else{
+                            break;
+                        }
+                }
+            }
+            // now there must be an `as` keyword
+            let _ = <Token![as]>::parse(&content);
+            let as_name = syn::Ident::parse(&content)?.to_string();
+            let _ = <Token![;]>::parse(&content);
+            
+            exposed_pins.push(__ExposedPins { pins, as_name });
             match syn::Ident::parse(&content) {
                 Result::Ok(i) => {
                     if i != PIN_EXPOSE_KEYWORD {
@@ -153,6 +183,23 @@ impl Parse for PcbMacroInput {
                 }
                 // this just means we have completed the parsing
                 Result::Err(_) => break,
+            }
+        }
+
+        let mut temp = HashMap::new();
+        for ep in &exposed_pins{
+            for p in &ep.pins{
+                if temp.contains_key(p){
+                    let previous = temp.get(p).unwrap();
+                    let t = format!("pin exposed multiple times : chip {} pin {} is exposed as {} and {}",
+                        p.chip,p.pin,previous, ep.as_name
+                    );
+                    return Err(syn::Error::new_spanned(&name,t));
+                }else{
+                    temp.insert(p,&ep.as_name);
+                }
+                    
+                
             }
         }
 
@@ -239,6 +286,24 @@ impl PcbMacroInput {
                 return quote!{};
             }
             let pin_names = pins.iter().map(|n|{quote!{#n}});
+            let exposed_pins:Vec<_> = self.exposed_pins.iter()
+                .flat_map(|ep|&ep.pins)
+                .filter(|p|{p.chip == *name})
+                .map(|cp|&cp.pin)
+                .map(|n|quote!{#n})
+                .collect();
+            let exposed_pin_check = if exposed_pins.len() == 0{
+                quote!{}
+            }else{
+                let names = exposed_pins.iter();
+                quote!{
+                    for pin in [#(#names),*]{
+                        if !chip_pins.contains_key(pin){
+                            return std::result::Result::Err(format!("Invalid chip added : chip {} expected to have pin named {}, not found",#name,pin));
+                        }
+                    }
+                }
+            };
             quote!{
                 let chip = self.added_chip_map.get(#name).unwrap();
                 let chip_pins = chip.get_pin_list();
@@ -247,6 +312,7 @@ impl PcbMacroInput {
                         return std::result::Result::Err(format!("Invalid chip added : chip {} expected to have pin named {}, not found",#name,pin));
                     }
                 }
+                #exposed_pin_check
             }
         });
 
@@ -302,6 +368,32 @@ impl PcbMacroInput {
             });
 
         let shorted_pins = self.get_short_pin_set();
+
+        // TODO maybe move this to the parsing stage?
+        for ep in &self.exposed_pins{
+            let pins = &ep.pins;
+            if pins.len() == 1{
+                // ignore the check if non-shorting expose
+                continue;
+            }
+            for pin in pins{
+                for sp in &shorted_pins{
+                    if sp.contains(pin){
+                        let error_msg = format!(
+                            "exposed shorted pins {:?} are also shorted with non-exposed pins {:?} which is not allowed",
+                            pins,
+                            sp
+                        );
+                        return quote::quote_spanned!{self.name.span()=>
+                            compile_error!(#error_msg);
+                        };
+                        
+                    }
+                    
+                }
+            }
+        }
+
         let shorted_pins_tokens = shorted_pins.iter().map(|group|{
             let g = group.iter().map(|cp|{
                 let chip = &cp.chip;
@@ -318,11 +410,66 @@ impl PcbMacroInput {
             }
         });
 
+        // TODO add a test to verify this
+        let exposed_pin_type_check = {
+            let instantiate_chip_vars = self.chip_map.iter().map(|(name, _)| {    
+                let __name = quote::format_ident!("_{}",&name);
+                quote! {let #__name = self.added_chip_map.get(#name).unwrap().get_pin_list();}
+            });
+
+            let checks = self.exposed_pins.iter().map(|ep|{
+                if ep.pins.len() == 1{
+                    // skip for single (non-shorted) exposed pin
+                    return quote!{};
+                }
+                let zeroth_chip = &ep.pins[0].chip;
+                let zeroth_pin = &ep.pins[0].pin;
+                let zeroth_chip_ident = quote::format_ident!("_{}",zeroth_chip);
+                let zeroth_extracted = quote!{
+                    let first_type = &#zeroth_chip_ident.get(#zeroth_pin).unwrap().data_type;
+                };
+                let pin_checks = ep.pins.iter().map(|p|{
+                    let _chip = &p.chip;
+                    let _pin = &p.pin;
+                    let chip_ident = quote::format_ident!("_{}",_chip);
+                    quote!{
+                        let md = #chip_ident.get(#_pin).unwrap();
+                        if !matches!(md.pin_type,pcb_rs::PinType::Input){
+                            return std::result::Result::Err(format!(
+                                "chip {} pin {} is expected to be input type, as it is exposed and shorted with other pins, but was not. only input type pins are allowed to be shorted when exposing",
+                                #_chip,#_pin
+                            ));
+                        }
+                        if md.data_type != *first_type{
+                            return std::result::Result::Err(format!(
+                                "chip {} pin {} is expected to be of {} type, as it is shorted with pin of that type, but was found to be of {} type",
+                                #_chip,#_pin,first_type,md.data_type
+                            ));
+                        }
+                    }
+                });
+                quote!{
+                    #zeroth_extracted
+                    #(#pin_checks)*
+                }
+            });
+
+
+            quote!{
+                #(#instantiate_chip_vars)*
+                #(#checks)*
+            }
+        };
+
         // ci is ChipInterface
         
-        let ci_pin_map = self.exposed_pins.iter().map(|(cp,as_name)|{
-            let pin_name = &cp.pin;
-            let chip_name = &cp.chip;
+        let ci_pin_map = self.exposed_pins.iter().map(|ep|{
+            // note that metadata for all shorted exposed pins must be same, which
+            // will be verified at building time, so we can just give metadata of first pin
+            // and in case there is a single pin, it will be 0th
+            let pin_name = &ep.pins[0].pin;
+            let chip_name = &ep.pins[0].chip;
+            let as_name = &ep.as_name;
             quote!{
                 let __chip = self.chips.get(#chip_name).unwrap();
                 let md = __chip.get_pin_list().get(#pin_name).unwrap().clone();
@@ -330,9 +477,14 @@ impl PcbMacroInput {
             }
         });
 
-        let ci_get_value = self.exposed_pins.iter().map(|(cp,as_name)|{
-            let pin_name = &cp.pin;
-            let chip_name = &cp.chip;
+        let ci_get_value = self.exposed_pins.iter().map(|ep|{
+            // note that the shorted pins must be of input type, shorting multiple o/p
+            // is not valid and will error at building time
+            // thus, this is only valid when all pins are input type, and as all are shorted,
+            // we can just give 0th pin's value
+            let pin_name = &ep.pins[0].pin;
+            let chip_name = &ep.pins[0].chip;
+            let as_name = &ep.as_name;
             quote!{
                 #as_name =>{
                     let __chip = self.chips.get(#chip_name).unwrap();
@@ -341,40 +493,74 @@ impl PcbMacroInput {
             }
         });
 
-        let ci_set_value = self.exposed_pins.iter().map(|(cp,as_name)|{
-            let pin_name = &cp.pin;
-            let chip_name = &cp.chip;
-            quote!{
-                #as_name =>{
+        let ci_set_value = self.exposed_pins.iter().map(|ep|{
+            let t = ep.pins.iter().map(|cp|{
+                let pin_name = &cp.pin;
+                let chip_name = &cp.chip;
+                quote!{
                     let __chip = self.chips.get_mut(#chip_name).unwrap();
-                    return __chip.set_pin_value(#pin_name,val);
+                    if ! __chip.is_pin_tristated(#chip_name){
+                        __chip.set_pin_value(#pin_name,val);
+                    }
+                }
+            });
+            let as_name = &ep.as_name;
+            quote!{
+                #as_name =>{
+                    #(#t)*
+                    return;
                 }
             }
         });
 
-        let ci_pin_tristated = self.exposed_pins.iter().map(|(cp,as_name)|{
-            let pin_name = &cp.pin;
-            let chip_name = &cp.chip;
-            quote!{
-                #as_name =>{
-                    let __chip = self.chips.get(#chip_name).unwrap();
-                    return __chip.is_pin_tristated(#pin_name);
+        let ci_pin_tristated = self.exposed_pins.iter().map(|ep|{
+            // as the only pins to be grouped in expose are of input type,
+            // so it does not make sense to ask if the pins are tristated or not,
+            // as that majorly matters when the pin is output type.
+            // and when setting pins values, pins which are tristated are ignored anyways,
+            // so we can just return false in that case
+            let as_name = &ep.as_name;
+            if ep.pins.len() == 1{
+                let chip_name = &ep.pins[0].chip;
+                let pin_name = &ep.pins[0].pin;
+                quote!{
+                    #as_name =>{
+                        let __chip = self.chips.get(#chip_name).unwrap();
+                        return __chip.is_pin_tristated(#pin_name);
+                    }
+                }
+            }else{
+                quote!{
+                    #as_name =>{
+                        false
+                    }
                 }
             }
+            
         });
 
-        let ci_pin_input_mode = self.exposed_pins.iter().map(|(cp,as_name)|{
-            let pin_name = &cp.pin;
-            let chip_name = &cp.chip;
-            quote!{
-                #as_name =>{
-                    let __chip = self.chips.get(#chip_name).unwrap();
-                    return __chip.in_input_mode(#pin_name);
+        let ci_pin_input_mode = self.exposed_pins.iter().map(|ep|{
+            // as only input type pins are allowed to be shorted , in case there are shorted pins, 
+            // they will have to be in input type
+            let as_name = &ep.as_name;
+            if ep.pins.len() == 1{
+                let chip_name = &ep.pins[0].chip;
+                let pin_name = &ep.pins[0].pin;
+                quote!{
+                    #as_name =>{
+                        let __chip = self.chips.get(#chip_name).unwrap();
+                        return __chip.in_input_mode(#pin_name);
+                    }
+                }
+            }else{
+                quote!{
+                    #as_name =>{
+                        return true;
+                    }
                 }
             }
+            
         });
-        
-        
 
         quote! {
             
@@ -433,6 +619,12 @@ impl PcbMacroInput {
                     #(#instantiate_chip_vars)*
                     #(#pin_connection_checks)*
                     
+                    std::result::Result::Ok(())
+                }
+
+                fn check_exposed_pin_types(&self)->std::result::Result<(),std::string::String>{
+                    #exposed_pin_type_check
+
                     std::result::Result::Ok(())
                 }
 

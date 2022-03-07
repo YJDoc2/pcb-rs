@@ -9,6 +9,11 @@ struct TestChip1 {
     #[pin(output)]
     pin3: String,
 
+    #[pin(input)]
+    short_expose_check1: u8,
+    #[pin(output)]
+    short_expose_check2: u8,
+
     internal_1: String,
     internal_2: u8,
 }
@@ -26,6 +31,11 @@ struct TestChip2 {
     #[pin(input)]
     pin3: String,
 
+    #[pin(input)]
+    short_expose_check1: u8,
+    #[pin(output)]
+    short_expose_check2: u8,
+
     internal_1: String,
     internal_2: bool,
 }
@@ -42,6 +52,8 @@ pcb!(TestPCB{
     tc1::pin2 - tc2::pin2;
     tc1::pin3 - tc2::pin3;
 
+    expose tc1::short_expose_check1,tc2::short_expose_check1 as sec1;
+
 });
 fn main() {
     let tc1 = Box::new(TestChip1::default());
@@ -51,7 +63,6 @@ fn main() {
         .add_chip("tc1", tc1)
         .add_chip("tc2", tc2);
     let mut test_pcb = temp.build().unwrap();
-
     let t: &TestChip1 = test_pcb.get_chip("tc1").unwrap();
     let t: &mut TestChip2 = test_pcb.get_chip_mut("tc2").unwrap();
 
