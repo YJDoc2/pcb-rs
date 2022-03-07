@@ -564,7 +564,7 @@ impl PcbMacroInput {
 
         quote! {
             
-            struct #builder_name{
+            pub struct #builder_name{
                 added_chip_map:std::collections::HashMap<std::string::String,std::boxed::Box<dyn pcb_rs::HardwareModule>>,
                 shorted_pins:std::vec::Vec<std::vec::Vec<pcb_rs::ChipPin>>,
                 pin_metadata_cache:std::collections::HashMap<pcb_rs::ChipPin,pcb_rs::PinMetadata>
@@ -592,6 +592,7 @@ impl PcbMacroInput {
                     // this will validate pin connections as well as set up
                     // the pin metadata in hashmap
                     self.check_valid_pin_connection()?;
+                    self.check_exposed_pin_types()?;
                     let pin_connections = self.get_pin_connections()?;
 
                     std::result::Result::Ok(#pcb_name{
@@ -654,7 +655,7 @@ impl PcbMacroInput {
 
             }
 
-            struct #pcb_name{
+            pub struct #pcb_name{
                 chips:std::collections::HashMap<std::string::String,std::boxed::Box<dyn pcb_rs::HardwareModule>>,
                 pin_connections:std::vec::Vec<pcb_rs::ConnectedPins>
             }
