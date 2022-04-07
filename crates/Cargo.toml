@@ -1,0 +1,6 @@
+[workspace]
+members = [
+  "pcb-rs",
+  "pcb-rs-traits",
+  "pcb-rs-macros"
+]
